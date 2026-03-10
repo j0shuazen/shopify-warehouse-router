@@ -11,10 +11,13 @@ def _make_config(**overrides):
     config.SHOPIFY_STORE_NAME = "test-store"
     config.SHOPIFY_ACCESS_TOKEN = "shpat_test"
     config.SHOPIFY_API_VERSION = "2025-07"
-    config.EU_WAREHOUSE_URL = "https://eu.example.com"
-    config.EU_WAREHOUSE_API_KEY = "eu-key"
-    config.US_WAREHOUSE_URL = "https://us.example.com"
-    config.US_WAREHOUSE_API_KEY = "us-key"
+    config.EU_WAREHOUSE_URL = "https://api.shipbob.com/2.0/order"
+    config.EU_WAREHOUSE_API_KEY = "shipbob-pat"
+    config.SHIPBOB_CHANNEL_ID = "12345"
+    config.US_WAREHOUSE_URL = "https://api.dclcorp.com/api/v1/batches"
+    config.DCL_USERNAME = "dcl-user"
+    config.DCL_PASSWORD = "dcl-pass"
+    config.DCL_ACCOUNT_NUMBER = "ACCT-001"
     config.LIVE_MODE = False
     config.ORDERS_PER_PAGE = 10
     for k, v in overrides.items():

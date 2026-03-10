@@ -6,13 +6,15 @@ A Python integration that retrieves orders from Shopify's Admin GraphQL API, app
 
 The system is structured as a lightweight middleware pipeline:
 
-1. **Fetch** — `ShopifyClient` queries orders via the Admin GraphQL API using cursor-based pagination. It handles rate limiting (HTTP 429 and GraphQL `THROTTLED` errors) with exponential backoff retries.
+1. **Fetch** — `ShopifyClient` queries orders via the Admin GraphQL API using cursor-based pagination. It filters for paid orders by default and handles rate limiting (HTTP 429 and GraphQL `THROTTLED` errors) with exponential backoff retries.
 
 2. **Route** — `determine_warehouse()` inspects each order's line item SKUs. If any SKU starts with `EU-`, the order routes to the EU warehouse. Otherwise, if any SKU starts with `US-`, it routes to the US warehouse. EU takes priority per the if/else-if rule structure.
 
-3. **Dispatch** — `EUWarehouseClient` and `USWarehouseClient` each wrap their respective endpoint. In simulation mode (default), they log the payload. In live mode, they POST it.
+3. **Dispatch** — Each warehouse client transforms the generic order payload into the vendor's specific API schema, then POSTs it (live mode) or logs it (simulation mode):
+   - **EU → ShipBob** (`POST /2.0/order`): Bearer token auth + `shipbob_channel_id` header. Payload includes `reference_id` (idempotency key), `recipient`, `products` matched by SKU, and `type`/`shipping_method`.
+   - **US → DCL Logistics** (`POST /api/v1/batches`): HTTP Basic Auth. Orders submitted in batch format with `account_number`, `shipping_address`, and `lines` with sequential `line_number`.
 
-Each API system (Shopify, EU warehouse, US warehouse) is wrapped in its own class with independent configuration, making it straightforward to swap, extend, or test each integration separately.
+Each API system (Shopify, ShipBob, DCL) is wrapped in its own class with independent configuration and auth, making it straightforward to swap, extend, or test each integration separately.
 
 ## Architecture
 
@@ -32,13 +34,14 @@ main.py                          ← Orchestrator / entrypoint
 
 ## Assumptions
 
-- **Authentication**: Shopify access is via a Custom App admin API access token (the `X-Shopify-Access-Token` header approach). The token is provided as an environment variable.
-- **API version**: Uses Shopify Admin API version `2025-07`. The GraphQL query structure reflects the real `orders` connection type with `edges`/`node`/`pageInfo` pagination.
-- **SKU resolution**: SKU is read from `lineItem.sku` first (the snapshot from order creation), falling back to `lineItem.variant.sku` (the current catalog value). Items with no SKU on either level are logged as warnings and skipped during routing.
-- **EU priority**: When an order contains both `EU-` and `US-` prefixed SKUs, the entire order routes to the EU warehouse (per the if/else-if rule structure in the spec).
-- **Warehouse endpoints**: Per the assignment, the EU and US endpoints are assumed as given. Payloads are transformed to approximate each vendor's schema (ShipBob-style for EU, DCL-style for US). In a production integration, endpoint paths, auth schemes, and payload contracts would be validated against each vendor's current API documentation. In simulation mode (default), no actual HTTP requests are made.
-- **Order page limit**: `main.py` defaults to `max_pages=5` (up to 250 orders per run) as a safety bound. This is configurable — pass a different value to `fetch_orders(max_pages=N)` or `None` to fetch all pages. In production, this would be driven by a CLI flag or environment variable.
-- **Line items per order**: The query fetches up to 50 line items per order. Orders exceeding this (uncommon outside B2B) would require inner pagination on the `lineItems` connection. The current implementation does not paginate line items but would log incomplete data if `lineItems.pageInfo.hasNextPage` were checked (a natural next step).
+- **Shopify auth**: Custom App admin API access token (`X-Shopify-Access-Token` header).
+- **API version**: Shopify Admin API `2025-07`. The GraphQL query reflects the real `orders` connection type with `edges`/`node`/`pageInfo` pagination.
+- **SKU resolution**: Reads `lineItem.sku` first (order-time snapshot), falls back to `variant.sku` (live catalog value). Missing SKUs are logged as warnings and skipped.
+- **EU priority**: When an order contains both `EU-` and `US-` prefixed SKUs, the entire order routes to the EU warehouse per the if/else-if spec.
+- **ShipBob integration**: Uses the order creation endpoint (`POST /2.0/order`) with Bearer PAT auth and required `shipbob_channel_id` header. Products are matched by `reference_id` (SKU). See [ShipBob API docs](https://developer.shipbob.com/).
+- **DCL integration**: Uses the batch order endpoint (`POST /api/v1/batches`) with HTTP Basic Auth (RFC 2617). Orders include `account_number`, carrier/service defaults, and line items with sequential numbering. See [DCL API docs](https://api.dclcorp.com/Help).
+- **Order page limit**: `main.py` defaults to `max_pages=5` (up to 250 orders per run) as a safety bound. Configurable via `fetch_orders(max_pages=N)` or `None` for unlimited.
+- **Line items per order**: Fetches up to 50 line items per order. Orders exceeding this (uncommon outside B2B) would require inner pagination on the `lineItems` connection — a natural next step.
 
 ## How to Run
 
@@ -57,7 +60,7 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your Shopify store name and access token
+# Edit .env with your credentials (see .env.example for all fields)
 ```
 
 ### Run the router
@@ -66,9 +69,9 @@ cp .env.example .env
 python main.py
 ```
 
-By default, the router runs in **simulation mode** — it fetches orders from Shopify and logs what would be sent to each warehouse without making actual POST requests to the warehouse endpoints.
+By default, the router runs in **simulation mode** — it fetches orders from Shopify and logs what would be sent to each warehouse without making actual POST requests.
 
-To enable live dispatch, set `LIVE_MODE=true` in your `.env` file.
+To enable live dispatch, set `LIVE_MODE=true` in your `.env` file. In live mode, ShipBob and DCL warehouse credentials are validated before any API calls are made.
 
 ### Run tests
 
