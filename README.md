@@ -36,8 +36,9 @@ main.py                          ← Orchestrator / entrypoint
 - **API version**: Uses Shopify Admin API version `2025-07`. The GraphQL query structure reflects the real `orders` connection type with `edges`/`node`/`pageInfo` pagination.
 - **SKU resolution**: SKU is read from `lineItem.sku` first (the snapshot from order creation), falling back to `lineItem.variant.sku` (the current catalog value). Items with no SKU on either level are logged as warnings and skipped during routing.
 - **EU priority**: When an order contains both `EU-` and `US-` prefixed SKUs, the entire order routes to the EU warehouse (per the if/else-if rule structure in the spec).
-- **Warehouse endpoints**: The EU and US endpoints are treated as REST APIs accepting JSON POST payloads. In simulation mode (default), no actual HTTP requests are made to these endpoints.
-- **Line items per order**: The query fetches up to 50 line items per order. For orders with more than 50 line items, additional pagination would be needed (not implemented, as this is uncommon).
+- **Warehouse endpoints**: Per the assignment, the EU and US endpoints are assumed as given. Payloads are transformed to approximate each vendor's schema (ShipBob-style for EU, DCL-style for US). In a production integration, endpoint paths, auth schemes, and payload contracts would be validated against each vendor's current API documentation. In simulation mode (default), no actual HTTP requests are made.
+- **Order page limit**: `main.py` defaults to `max_pages=5` (up to 250 orders per run) as a safety bound. This is configurable — pass a different value to `fetch_orders(max_pages=N)` or `None` to fetch all pages. In production, this would be driven by a CLI flag or environment variable.
+- **Line items per order**: The query fetches up to 50 line items per order. Orders exceeding this (uncommon outside B2B) would require inner pagination on the `lineItems` connection. The current implementation does not paginate line items but would log incomplete data if `lineItems.pageInfo.hasNextPage` were checked (a natural next step).
 
 ## How to Run
 
@@ -79,7 +80,7 @@ python -m unittest discover -s tests -v
 
 ## Bonus Features Implemented
 
-- **Pagination**: Cursor-based pagination fetches all order pages (with a configurable `max_pages` safety limit)
+- **Pagination**: Cursor-based pagination fetches order pages with a configurable `max_pages` safety limit (default 5 / 250 orders; set to `None` for unlimited)
 - **Rate limit handling**: Exponential backoff retry on both HTTP 429 responses and GraphQL `THROTTLED` errors
 - **Missing/blank SKU handling**: Logged as warnings, gracefully skipped during routing — never causes a crash
 - **Case-insensitive SKU matching**: `eu-widget-001` routes the same as `EU-WIDGET-001`
