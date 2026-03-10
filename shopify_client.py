@@ -15,8 +15,8 @@ logger = logging.getLogger(__name__)
 # GraphQL query that fetches orders with line items, SKUs, and pagination support.
 # Uses the Shopify Admin GraphQL API connection pattern (edges/node/pageInfo).
 ORDERS_QUERY = """
-query FetchOrders($first: Int!, $after: String) {
-  orders(first: $first, after: $after) {
+query FetchOrders($first: Int!, $after: String, $query: String) {
+  orders(first: $first, after: $after, query: $query) {
     edges {
       node {
         id
@@ -91,7 +91,14 @@ class ShopifyClient:
                     continue
 
                 response.raise_for_status()
-                result = response.json()
+
+                try:
+                    result = response.json()
+                except ValueError as exc:
+                    raise RuntimeError(
+                        f"Shopify returned non-JSON response (HTTP {response.status_code}): "
+                        f"{response.text[:200]}"
+                    ) from exc
 
                 # Handle GraphQL-level throttling (Shopify returns errors in the response body)
                 if "errors" in result:
@@ -120,12 +127,14 @@ class ShopifyClient:
 
         raise RuntimeError("Max retries exceeded for Shopify GraphQL request")
 
-    def fetch_orders(self, max_pages: int | None = None) -> list[dict]:
+    def fetch_orders(self, max_pages: int | None = None, query: str | None = "financial_status:paid") -> list[dict]:
         """Fetch orders from Shopify using cursor-based pagination.
 
         Args:
             max_pages: Optional limit on the number of pages to fetch.
                        None means fetch all pages.
+            query: Shopify query filter string (e.g. "financial_status:paid").
+                   Defaults to paid orders only. Pass None to fetch all orders.
 
         Returns:
             List of order dicts with normalized line item data.
@@ -141,6 +150,8 @@ class ShopifyClient:
             variables = {"first": self.config.ORDERS_PER_PAGE}
             if cursor:
                 variables["after"] = cursor
+            if query:
+                variables["query"] = query
 
             data = self._execute_query(ORDERS_QUERY, variables)
             orders_data = data["orders"]

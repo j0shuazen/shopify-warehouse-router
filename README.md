@@ -17,13 +17,17 @@ Each API system (Shopify, EU warehouse, US warehouse) is wrapped in its own clas
 ## Architecture
 
 ```
-main.py                  ← Orchestrator / entrypoint
-├── config.py            ← Environment-based configuration
-├── shopify_client.py    ← Shopify Admin GraphQL API client
-├── router.py            ← SKU-based routing logic + payload builder
-├── warehouse_clients.py ← EU (ShipBob) + US (DCL) warehouse clients
+main.py                          ← Orchestrator / entrypoint
+├── config.py                    ← Environment-based configuration
+├── shopify_client.py            ← Shopify Admin GraphQL API client
+├── router.py                    ← SKU-based routing logic + payload builder
+├── warehouse_clients.py         ← EU (ShipBob) + US (DCL) warehouse clients
 └── tests/
-    └── test_router.py   ← Unit tests for routing logic
+    ├── test_config.py           ← Config validation tests
+    ├── test_router.py           ← Routing logic + payload builder tests
+    ├── test_shopify_client.py   ← GraphQL client, pagination, retry tests
+    ├── test_warehouse_clients.py← Warehouse dispatch + transform tests
+    └── test_main.py             ← End-to-end orchestration tests
 ```
 
 ## Assumptions
@@ -39,7 +43,7 @@ main.py                  ← Orchestrator / entrypoint
 
 ### Prerequisites
 
-- Python 3.10+
+- Python 3.9+
 - `pip` (or any Python package manager)
 
 ### Setup
@@ -69,6 +73,8 @@ To enable live dispatch, set `LIVE_MODE=true` in your `.env` file.
 
 ```bash
 python -m pytest tests/ -v
+# or without pytest:
+python -m unittest discover -s tests -v
 ```
 
 ## Bonus Features Implemented

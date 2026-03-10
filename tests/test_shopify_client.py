@@ -216,6 +216,31 @@ class TestFetchOrders(unittest.TestCase):
         orders = self.client.fetch_orders()
         self.assertEqual(orders, [])
 
+    @patch.object(ShopifyClient, "_execute_query")
+    def test_default_query_filter_is_paid(self, mock_query):
+        """By default, fetch_orders passes financial_status:paid query filter."""
+        mock_query.return_value = _graphql_response([])["data"]
+
+        self.client.fetch_orders()
+        call_vars = mock_query.call_args[1].get("variables") or mock_query.call_args[0][1]
+        self.assertEqual(call_vars["query"], "financial_status:paid")
+
+    @patch.object(ShopifyClient, "_execute_query")
+    def test_custom_query_filter(self, mock_query):
+        mock_query.return_value = _graphql_response([])["data"]
+
+        self.client.fetch_orders(query="fulfillment_status:unshipped")
+        call_vars = mock_query.call_args[1].get("variables") or mock_query.call_args[0][1]
+        self.assertEqual(call_vars["query"], "fulfillment_status:unshipped")
+
+    @patch.object(ShopifyClient, "_execute_query")
+    def test_none_query_filter_omitted(self, mock_query):
+        mock_query.return_value = _graphql_response([])["data"]
+
+        self.client.fetch_orders(query=None)
+        call_vars = mock_query.call_args[1].get("variables") or mock_query.call_args[0][1]
+        self.assertNotIn("query", call_vars)
+
 
 class TestExecuteQuery(unittest.TestCase):
     """Tests for ShopifyClient._execute_query() retry and error handling."""
@@ -341,6 +366,21 @@ class TestExecuteQuery(unittest.TestCase):
         call_kwargs = self.client.session.post.call_args
         sent_json = call_kwargs[1]["json"] if "json" in call_kwargs[1] else call_kwargs[0][1]
         self.assertEqual(sent_json["variables"], {"first": 10, "after": "abc"})
+
+    @patch("shopify_client.time.sleep")
+    def test_non_json_response_raises_runtime_error(self, mock_sleep):
+        """If Shopify returns non-JSON (e.g. HTML on a 502), raise a clear error."""
+        bad_response = MagicMock()
+        bad_response.status_code = 200
+        bad_response.raise_for_status = MagicMock()
+        bad_response.json.side_effect = ValueError("No JSON object could be decoded")
+        bad_response.text = "<html>Bad Gateway</html>"
+        self.client.session.post = MagicMock(return_value=bad_response)
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.client._execute_query("{ test }")
+        self.assertIn("non-JSON response", str(ctx.exception))
+        self.assertIn("Bad Gateway", str(ctx.exception))
 
     @patch("shopify_client.time.sleep")
     def test_no_variables_omitted_from_payload(self, mock_sleep):
