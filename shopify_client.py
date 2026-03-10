@@ -1,7 +1,10 @@
 """Shopify Admin GraphQL API client for retrieving orders."""
 
+from __future__ import annotations
+
 import logging
 import time
+from typing import Optional
 
 import requests
 
